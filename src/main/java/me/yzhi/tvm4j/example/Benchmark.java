@@ -27,10 +27,10 @@ public class Benchmark {
   public static void main(String[] args) throws IOException {
 
     String loadingDir = args[0];
-    Module libmod = Module.load(loadingDir + File.separator + "deploy_lib.so");
-    String graphJson = new Scanner(new File(loadingDir + File.separator + "deploy_graph.json"))
+    Module libmod = Module.load(loadingDir + File.separator + "resnet18_v1.so");
+    String graphJson = new Scanner(new File(loadingDir + File.separator + "resnet18_v1.json"))
         .useDelimiter("\\Z").next();
-    byte[] params = readBytes(loadingDir + File.separator + "deploy_param.params");
+    byte[] params = readBytes(loadingDir + File.separator + "resnet18_v1.params");
 
     TVMContext ctx = TVMContext.cpu();
 
@@ -50,16 +50,17 @@ public class Benchmark {
     float top5 = 0;
     int best = 0;
     float bestVal = Float.NEGATIVE_INFINITY;
-    for (i=0; i<1000; i++) {
+    NDArrayIndexing();
+    for (i=0; i<1; i++) {
       String path = String.format("/home/ubuntu/imagenet1000/ILSVRC2012_val_%08d.JPEG", i + 1);
       graph.loadParams(params).setInput("data", ImageArray(path)).run();
       NDArray output = NDArray.empty(new long[]{1, 1000});
-      float[] outputArr = output.asFloatArray();
       graph.getOutput(0, output);
+      float[] outputArr = output.asFloatArray();
       best = 0;
-      System.out.println(String.format("labels[%d] = %d", i, labels[i]));
+//      System.out.println(String.format("labels[%d] = %d", i, labels[i]));
       for (int j=0; j<1000; j++) {
-        System.out.println(String.format("out[%d] = %f", j, outputArr[j]));
+//        System.out.println(String.format("out[%d] = %f", j, outputArr[j]));
         if (outputArr[i] > bestVal) {
           best = j;
           bestVal = outputArr[i];
@@ -68,21 +69,11 @@ public class Benchmark {
       if (labels[i] == best) {
         top1 += 1;
       }
+      System.out.println(String.format("%f of %d (%f)", top1, i+1, (float)(top1/(i+1))));
         // TODO: argsort to get top5?
     }
     top1 /= 1000;
     System.out.println(top1);
-    
-//    graph.loadParams(params).setInput("data", RandomInput()).run();
-//
-//    NDArray output = NDArray.empty(new long[]{1, 1000});
-//    graph.getOutput(0, output);
-//
-//    float[] outputArr = output.asFloatArray();
-//    for (int i = 0; i < 10; ++i) {
-//      System.out.println(outputArr[i]);
-//    }
-
     System.out.println("Done.");
   }
 
@@ -104,6 +95,15 @@ public class Benchmark {
     return nd;
   }
 
+  private static void NDArrayIndexing() {
+    float[] arr = new float[2 * 3 * 4];
+    for (int i=0; i<2 * 3 * 4; i++) {
+      arr[i] = (float) i;
+    }
+    NDArray nd = NDArray.empty(new long[]{1, 2, 3, 4});
+    nd.copyFrom(arr);
+  }
+
   public static BufferedImage toBufferedImage(Image img) {
     if (img instanceof BufferedImage) {
       return (BufferedImage) img;
@@ -121,17 +121,31 @@ public class Benchmark {
     return bimage;
   }  
 
+  public static void write (String filename, float[]x) throws IOException{
+    BufferedWriter outputWriter = null;
+    outputWriter = new BufferedWriter(new FileWriter(filename));
+    for (int i = 0; i < x.length; i++) {
+      outputWriter.write(Float.toString(x[i]));
+      outputWriter.newLine();
+    }
+    outputWriter.flush();
+    outputWriter.close();
+  }
+
   private static NDArray ImageArray(String path) {
     try {
       img = toBufferedImage(ImageIO.read(new File(path)).getScaledInstance(224, 224, Image.SCALE_DEFAULT));
     } catch (IOException e) {
     }
     float[] arr = new float[3 * 224 * 224];
+    float[] brr = new float[3 * 224 * 224];
     int rgb;
+    int count = 0;
     float alpha;
     float red;
     float green;
     float blue;
+    float[] colors;
     for (int i = 0; i < 224; i++) {
       for (int j = 0; j < 224; j++) {
         rgb = img.getRGB(i, j); //always returns TYPE_INT_ARGB
@@ -139,10 +153,18 @@ public class Benchmark {
         red =   (float) ((rgb >> 16) & 0xFF);
         green = (float) ((rgb >>  8) & 0xFF);
         blue =  (float) ((rgb      ) & 0xFF);
-        arr[3 * 224 * 0 + 224 * i + j] = (float) ((red - 123) / 58.395);
-        arr[3 * 224 * 1 + 224 * i + j] = (float) ((green - 117) / 57.12);
-        arr[3 * 224 * 2 + 224 * i + j] = (float) ((blue - 104) / 57.375);
+        colors = new float[]{(float) ((red - 123) / 58.395), (float) ((green - 117) / 57.12), (float) ((blue - 104) / 57.375)};
+        brr[224 * 224 * 0 + 224 * j + i] = red / 256;
+        brr[224 * 224 * 1 + 224 * j + i] = green / 256;
+        brr[224 * 224 * 2 + 224 * j + i] = blue / 256;
+        for (int k=0; k<3; k++) {
+          arr[224 * 224 * k + 224 * j + i] = colors[k];
+        }
       }
+    }
+    try {
+      write("arr.txt", brr);
+    } catch (IOException e) {
     }
     NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
     nd.copyFrom(arr);
