@@ -19,6 +19,8 @@ import javax.swing.*;
 
 import java.io.FileReader;
 import java.io.BufferedReader;
+import java.time.Instant;
+import java.time.Duration;
 
 public class Benchmark {
 
@@ -27,10 +29,10 @@ public class Benchmark {
   public static void main(String[] args) throws IOException {
 
     String loadingDir = args[0];
-    Module libmod = Module.load(loadingDir + File.separator + "resnet18_v1.so");
-    String graphJson = new Scanner(new File(loadingDir + File.separator + "resnet18_v1.json"))
+    Module libmod = Module.load(loadingDir + File.separator + "net.so");
+    String graphJson = new Scanner(new File(loadingDir + File.separator + "net.json"))
         .useDelimiter("\\Z").next();
-    byte[] params = readBytes(loadingDir + File.separator + "resnet18_v1.params");
+    byte[] params = readBytes(loadingDir + File.separator + "net.params");
 
     TVMContext ctx = TVMContext.cpu();
 
@@ -38,42 +40,62 @@ public class Benchmark {
 
     FileReader fileReader = new FileReader("/home/ubuntu/labels.txt");
     BufferedReader bufferedReader = new BufferedReader(fileReader);
-    int[] labels = new int[1000];
-    int i = 0;
-    String line = null;
-    while ((line = bufferedReader.readLine()) != null) {
-        labels[i] = Integer.parseInt(line, 10); // newline char at end of line?
-        i += 1;
-    }
-    float count = 0;
-    float top1 = 0;
-    float top5 = 0;
-    int best = 0;
-    float bestVal = Float.NEGATIVE_INFINITY;
-    NDArrayIndexing();
-    for (i=0; i<1; i++) {
-      String path = String.format("/home/ubuntu/imagenet1000/ILSVRC2012_val_%08d.JPEG", i + 1);
-      graph.loadParams(params).setInput("data", ImageArray(path)).run();
-      NDArray output = NDArray.empty(new long[]{1, 1000});
-      graph.getOutput(0, output);
-      float[] outputArr = output.asFloatArray();
-      best = 0;
-//      System.out.println(String.format("labels[%d] = %d", i, labels[i]));
-      for (int j=0; j<1000; j++) {
-//        System.out.println(String.format("out[%d] = %f", j, outputArr[j]));
-        if (outputArr[i] > bestVal) {
-          best = j;
-          bestVal = outputArr[i];
-        }
-      }
-      if (labels[i] == best) {
-        top1 += 1;
-      }
-      System.out.println(String.format("%f of %d (%f)", top1, i+1, (float)(top1/(i+1))));
-        // TODO: argsort to get top5?
-    }
-    top1 /= 1000;
-    System.out.println(top1);
+    graph.loadParams(params).setInput("data", FixedInput()).run();
+    NDArray output = NDArray.empty(new long[]{1, 1000});
+    graph.getOutput(0, output);
+    float[] outputArr = output.asFloatArray();
+    write("out.txt", outputArr);
+//    int[] labels = new int[1000];
+//    int i = 0;
+//    String line = null;
+//    while ((line = bufferedReader.readLine()) != null) {
+//        labels[i] = Integer.parseInt(line, 10); // newline char at end of line?
+//        i += 1;
+//    }
+//    float count = 0;
+//    float top1 = 0;
+//    float top5 = 0;
+//    int best = 0;
+//    float bestVal = Float.NEGATIVE_INFINITY;
+////    NDArrayIndexing();
+//    for (i=0; i<1; i++) {
+//      String path = String.format("/home/ubuntu/imagenet1000/ILSVRC2012_val_%08d.JPEG", i + 1);
+//      graph.loadParams(params).setInput("data", ImageArray(path));
+//      float latency = 0;
+//      float dt;
+//      int samplesize = 100;
+//      for (int k=0; k<samplesize; k++) {
+//        Instant first = Instant.now();
+//        graph.run();
+//        Instant second = Instant.now();
+//        Duration duration = Duration.between(first, second);
+//        dt = (float) duration.toNanos() / 1000000;
+//        latency += dt;
+//      }
+//      latency /= samplesize;
+//      write("latency.txt", new float[]{latency});
+//      System.out.println(String.format("Latency is %f ms.", latency));
+//      NDArray output = NDArray.empty(new long[]{1, 1000});
+//      graph.getOutput(0, output);
+//      float[] outputArr = output.asFloatArray();
+//      write("outputs.txt", outputArr);
+//      best = 0;
+////      System.out.println(String.format("labels[%d] = %d", i, labels[i]));
+//      for (int j=0; j<1000; j++) {
+////        System.out.println(String.format("out[%d] = %f", j, outputArr[j]));
+//        if (outputArr[i] > bestVal) {
+//          best = j;
+//          bestVal = outputArr[i];
+//        }
+//      }
+//      if (labels[i] == best) {
+//        top1 += 1;
+//      }
+//      System.out.println(String.format("%f of %d (%f)", top1, i+1, (float)(top1/(i+1))));
+//        // TODO: argsort to get top5?
+//    }
+//    top1 /= 1000;
+//    System.out.println(top1);
     System.out.println("Done.");
   }
 
@@ -94,6 +116,24 @@ public class Benchmark {
     nd.copyFrom(arr);
     return nd;
   }
+
+  private static NDArray FixedInput() throws IOException {
+    FileReader fileReader = new FileReader("arr.txt");
+    BufferedReader bufferedReader = new BufferedReader(fileReader);
+    float[] arr = new float[3 * 224 * 224];
+    
+    int i = 0;
+    String line = null;
+    while ((line = bufferedReader.readLine()) != null) {
+        arr[i] = Float.parseFloat(line);
+        i += 1;
+    }
+    NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
+    nd.copyFrom(arr);
+    return nd;
+  }
+    
+   
 
   private static void NDArrayIndexing() {
     float[] arr = new float[2 * 3 * 4];
