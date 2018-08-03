@@ -25,7 +25,7 @@ def main():
 
     print('run model with arr.txt')
     with open('arr.txt', 'r') as f:
-        arr = np.array(list(map(lambda s: float(s.replace('\n', '')), f)), dtype='float32').reshape((1, 3, 224, 224))
+        arr = np.array([s.replace('\n', '') for s in f], dtype='float32').reshape((1, 3, 224, 224))
 
     ctx = tvm.cpu()
     module = graph_runtime.create(graph, lib, ctx)
