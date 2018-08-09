@@ -6,7 +6,9 @@ mkdir -p $CURR_DIR/libs
 cp $PROJ_DIR/data/arr.txt .
 
 echo "Run python compiler and dump library ..."
-python $CURR_DIR/benchmark.py $CURR_DIR/libs
+echo $1
+echo $2
+python $CURR_DIR/benchmark.py $CURR_DIR/libs $1 $2
 
 echo "Run java code ..."
 CLASSPATH=$CLASSPATH:$PROJ_DIR/target/*:$PROJ_DIR/target/classes/lib/*

@@ -9,6 +9,9 @@ import ml.dmlc.tvm.contrib.GraphRuntime;
 import java.io.*;
 import java.util.Scanner;
 
+import java.time.Instant;
+import java.time.Duration;
+
 import static me.yzhi.tvm4j.example.GraphForward.readBytes;
 
 public class Benchmark {
@@ -24,26 +27,26 @@ public class Benchmark {
 
     GraphModule graph = GraphRuntime.create(graphJson, libmod, ctx);
 
-//    graph.loadParams(params).setInput("data", FixedInput()).run();
-    graph.loadParams(params).setInput("data", ArrayInput(1)).run();
-    NDArray output = NDArray.empty(new long[]{1, 1000});
-    graph.getOutput(0, output);
-    float[] outputArr = output.asFloatArray();
-    write("out_java.txt", outputArr);
+    float latency = 0;
+    for (int i=1; i<1001; i++) {
+      graph.loadParams(params).setInput("data", ArrayInput(i));
+      Instant first = Instant.now();
+      graph.run();
+      Instant second = Instant.now();
+      Duration duration = Duration.between(first, second);
+      latency += (float) duration.toNanos() / 1000000;
+      NDArray output = NDArray.empty(new long[]{1, 1000});
+      graph.getOutput(0, output);
+      float[] outputArr = output.asFloatArray();
+      write_floats(String.format("/home/ubuntu/out/%d.txt", i), outputArr);
+    }
+    latency /= 1000;
+    write_floats(String.format("/home/ubuntu/latency.txt"), new float[]{latency});
+
     System.out.println("Done.");
   }
 
   private static NDArray FixedInput() throws IOException {
-//    FileReader fileReader = new FileReader("arr.txt");
-//    BufferedReader bufferedReader = new BufferedReader(fileReader);
-//    float[] arr = new float[3 * 224 * 224];
-//
-//    int i = 0;
-//    String line = null;
-//    while ((line = bufferedReader.readLine()) != null) {
-//      arr[i] = Float.parseFloat(line);
-//      i += 1;
-//    }
     float[] arr = read_floats("arr.txt", 3 * 224 * 224);
     NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
     nd.copyFrom(arr);
@@ -51,7 +54,7 @@ public class Benchmark {
   }
 
   private static NDArray ArrayInput(int index) throws IOException {
-    float[] arr = read_floats(String.format("%d.txt", index), 3 * 224 * 224);
+    float[] arr = read_floats(String.format("/home/ubuntu/in/%d.txt", index), 3 * 224 * 224);
     NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
     nd.copyFrom(arr);
     return nd;
@@ -81,7 +84,7 @@ public class Benchmark {
     return arr;
   }
 
-  public static void write(String filename, float[]x) throws IOException{
+  public static void write_floats(String filename, float[]x) throws IOException{
     BufferedWriter outputWriter = null;
     outputWriter = new BufferedWriter(new FileWriter(filename));
     for (int i = 0; i < x.length; i++) {
@@ -91,7 +94,7 @@ public class Benchmark {
     outputWriter.close();
   }
 
-  public static void write(String filename, int[]x) throws IOException{
+  public static void write_ints(String filename, int[]x) throws IOException{
     BufferedWriter outputWriter = null;
     outputWriter = new BufferedWriter(new FileWriter(filename));
     for (int i = 0; i < x.length; i++) {
