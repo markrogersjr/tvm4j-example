@@ -9,12 +9,22 @@ import ml.dmlc.tvm.contrib.GraphRuntime;
 import java.io.*;
 import java.util.Scanner;
 
+import java.awt.*;
+import java.awt.event.*;
+import java.awt.image.*;
+import java.io.*;
+import javax.imageio.*;
+import javax.swing.*;
+
 import java.time.Instant;
 import java.time.Duration;
 
 import static me.yzhi.tvm4j.example.GraphForward.readBytes;
 
 public class Benchmark {
+
+  static BufferedImage img;
+
   public static void main(String[] args) throws IOException {
 
     String loadingDir = args[0];
@@ -26,13 +36,15 @@ public class Benchmark {
     TVMContext ctx = TVMContext.cpu();
 
     GraphModule graph = GraphRuntime.create(graphJson, libmod, ctx);
+    graph.loadParams(params);
 
     int[] labels = read_ints("/home/ubuntu/labels.txt", 1000);
     float accuracy = 0;
     float latency = 0;
     for (int i=0; i<1000; i++) {
 
-      graph.loadParams(params).setInput("data", ArrayInput(i + 1));
+      String path = String.format("/home/ubuntu/imagenet1000/ILSVRC2012_val_%08d.JPEG", i + 1);
+      graph.setInput("data", ImageArray(path));
 
       Instant first = Instant.now();
       graph.run();
@@ -124,6 +136,55 @@ public class Benchmark {
     }
     outputWriter.flush();
     outputWriter.close();
+  }
+
+  public static BufferedImage toBufferedImage(Image img) {
+    if (img instanceof BufferedImage) {
+      return (BufferedImage) img;
+    }
+  
+    // Create a buffered image with transparency
+    BufferedImage bimage = new BufferedImage(img.getWidth(null), img.getHeight(null), BufferedImage.TYPE_INT_ARGB);
+  
+    // Draw the image on to the buffered image
+    Graphics2D bGr = bimage.createGraphics();
+    bGr.drawImage(img, 0, 0, null);
+    bGr.dispose();
+  
+    // Return the buffered image
+    return bimage;
+  }  
+
+  private static NDArray ImageArray(String path) {
+    try {
+      img = toBufferedImage(ImageIO.read(new File(path)).getScaledInstance(224, 224, Image.SCALE_DEFAULT));
+    } catch (IOException e) {
+    }
+    float[] arr = new float[3 * 224 * 224];
+    float[] brr = new float[3 * 224 * 224];
+    int rgb;
+    int count = 0;
+    float alpha;
+    float red;
+    float green;
+    float blue;
+    float[] colors;
+    for (int i = 0; i < 224; i++) {
+      for (int j = 0; j < 224; j++) {
+        rgb = img.getRGB(i, j); //always returns TYPE_INT_ARGB
+        alpha = (float) ((rgb >> 24) & 0xFF);
+        red =   (float) ((rgb >> 16) & 0xFF);
+        green = (float) ((rgb >>  8) & 0xFF);
+        blue =  (float) ((rgb      ) & 0xFF);
+        colors = new float[]{(float) ((red - 123) / 58.395), (float) ((green - 117) / 57.12), (float) ((blue - 104) / 57.375)};
+        for (int k=0; k<3; k++) {
+          arr[224 * 224 * k + 224 * j + i] = colors[k];
+        }
+      }
+    }
+    NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
+    nd.copyFrom(arr);
+    return nd;
   }
 
 }
