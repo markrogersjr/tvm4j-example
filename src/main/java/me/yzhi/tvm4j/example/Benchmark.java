@@ -27,23 +27,45 @@ public class Benchmark {
 
     GraphModule graph = GraphRuntime.create(graphJson, libmod, ctx);
 
+    int[] labels = read_ints("/home/ubuntu/labels.txt", 1000);
+    float accuracy = 0;
     float latency = 0;
-    for (int i=1; i<1001; i++) {
-      graph.loadParams(params).setInput("data", ArrayInput(i));
+    for (int i=0; i<1000; i++) {
+
+      graph.loadParams(params).setInput("data", ArrayInput(i + 1));
+
       Instant first = Instant.now();
       graph.run();
       Instant second = Instant.now();
       Duration duration = Duration.between(first, second);
       latency += (float) duration.toNanos() / 1000000;
+
       NDArray output = NDArray.empty(new long[]{1, 1000});
       graph.getOutput(0, output);
       float[] outputArr = output.asFloatArray();
-      write_floats(String.format("/home/ubuntu/out/%d.txt", i), outputArr);
+      if (argmax(outputArr) == labels[i]) {
+        accuracy += 1;
+      }
+
     }
-    latency /= 1000;
-    write_floats(String.format("/home/ubuntu/latency.txt"), new float[]{latency});
+    accuracy *= 100.0 / 1000.0;
+    write_floats("/home/ubuntu/accuracy.txt", new float[]{accuracy});
+    latency /= 1000.0;
+    write_floats("/home/ubuntu/latency.txt", new float[]{latency});
 
     System.out.println("Done.");
+  }
+
+  public static int argmax(float[] arr) {
+    float bestval = Float.NEGATIVE_INFINITY;
+    int index = 0;
+    for (int i=0; i<arr.length; i++) {
+      if (arr[i] > bestval) {
+        index = i;
+        bestval = arr[i];
+      }
+    }
+    return index;
   }
 
   private static NDArray FixedInput() throws IOException {
