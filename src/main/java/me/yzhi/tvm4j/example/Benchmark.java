@@ -3,6 +3,7 @@ package me.yzhi.tvm4j.example;
 import ml.dmlc.tvm.Module;
 import ml.dmlc.tvm.NDArray;
 import ml.dmlc.tvm.TVMContext;
+import ml.dmlc.tvm.contrib.GraphModule;
 import ml.dmlc.tvm.contrib.GraphRuntime;
 
 import java.io.File;
@@ -22,81 +23,55 @@ import java.io.BufferedReader;
 import java.time.Instant;
 import java.time.Duration;
 
+
 public class Benchmark {
 
-  static BufferedImage img;
+  static BufferedImage img;  
 
   public static void main(String[] args) throws IOException {
 
-    String loadingDir = args[0];
-    Module libmod = Module.load(loadingDir + File.separator + "net.so");
-    String graphJson = new Scanner(new File(loadingDir + File.separator + "net.json"))
+    String modelDirname = args[0];
+    String imagesDirname = args[1];
+    String tempDirname = args[2];
+    String s3Dirname = args[3];
+    int dim = Integer.parseInt(args[4]);
+    Module libmod = Module.load(modelDirname + File.separator + "model.so");
+    String graphJson = new Scanner(new File(modelDirname + File.separator + "model.json"))
         .useDelimiter("\\Z").next();
-    byte[] params = readBytes(loadingDir + File.separator + "net.params");
+    byte[] params = readBytes(modelDirname + File.separator + "model.params");
 
     TVMContext ctx = TVMContext.cpu();
 
-    GraphRuntime.GraphModule graph = GraphRuntime.create(graphJson, libmod, ctx);
+    int[] labels = read(tempDirname + File.separator + "labels.txt", 1000);
+    float predictivity = 0;
+    float latency = 0;
+    float dt;
 
-    FileReader fileReader = new FileReader("/home/ubuntu/labels.txt");
-    BufferedReader bufferedReader = new BufferedReader(fileReader);
-    graph.loadParams(params).setInput("data", FixedInput()).run();
-    NDArray output = NDArray.empty(new long[]{1, 1000});
-    graph.getOutput(0, output);
-    float[] outputArr = output.asFloatArray();
-    write("out.txt", outputArr);
-//    int[] labels = new int[1000];
-//    int i = 0;
-//    String line = null;
-//    while ((line = bufferedReader.readLine()) != null) {
-//        labels[i] = Integer.parseInt(line, 10); // newline char at end of line?
-//        i += 1;
-//    }
-//    float count = 0;
-//    float top1 = 0;
-//    float top5 = 0;
-//    int best = 0;
-//    float bestVal = Float.NEGATIVE_INFINITY;
-////    NDArrayIndexing();
-//    for (i=0; i<1; i++) {
-//      String path = String.format("/home/ubuntu/imagenet1000/ILSVRC2012_val_%08d.JPEG", i + 1);
-//      graph.loadParams(params).setInput("data", ImageArray(path));
-//      float latency = 0;
-//      float dt;
-//      int samplesize = 100;
-//      for (int k=0; k<samplesize; k++) {
-//        Instant first = Instant.now();
-//        graph.run();
-//        Instant second = Instant.now();
-//        Duration duration = Duration.between(first, second);
-//        dt = (float) duration.toNanos() / 1000000;
-//        latency += dt;
-//      }
-//      latency /= samplesize;
-//      write("latency.txt", new float[]{latency});
-//      System.out.println(String.format("Latency is %f ms.", latency));
-//      NDArray output = NDArray.empty(new long[]{1, 1000});
-//      graph.getOutput(0, output);
-//      float[] outputArr = output.asFloatArray();
-//      write("outputs.txt", outputArr);
-//      best = 0;
-////      System.out.println(String.format("labels[%d] = %d", i, labels[i]));
-//      for (int j=0; j<1000; j++) {
-////        System.out.println(String.format("out[%d] = %f", j, outputArr[j]));
-//        if (outputArr[i] > bestVal) {
-//          best = j;
-//          bestVal = outputArr[i];
-//        }
-//      }
-//      if (labels[i] == best) {
-//        top1 += 1;
-//      }
-//      System.out.println(String.format("%f of %d (%f)", top1, i+1, (float)(top1/(i+1))));
-//        // TODO: argsort to get top5?
-//    }
-//    top1 /= 1000;
-//    System.out.println(top1);
-    System.out.println("Done.");
+    GraphModule graph = GraphRuntime.create(graphJson, libmod, ctx);
+    graph.loadParams(params);
+
+    for (int i=0; i<1000; i++) {
+      String image_filename = String.format("ILSVRC2012_val_%08d.JPEG", i + 1);
+      String image_path = imagesDirname + File.separator + image_filename;
+      NDArray x = ImageArray(image_path, dim);
+      Instant startTime = Instant.now();
+      graph.setInput("data", x);
+      graph.run();
+      NDArray y_arr = NDArray.empty(new long[]{1, 1000});
+      graph.getOutput(0, y_arr);
+      float[] y = y_arr.asFloatArray();
+      Instant endTime = Instant.now();
+      if (argMax(y) == labels[i])
+        predictivity += 1;
+      Duration duration = Duration.between(startTime, endTime);
+      dt = (float) duration.toNanos() / 1000000;
+      latency += dt;
+      System.out.println(String.format("Predictivity = %.2f%% | Latency = %.4f ms (%d/%d)", 100 * predictivity / (i + 1), latency / (i + 1), i + 1, 1000));
+    }
+    predictivity *= 100 / 1000;
+    latency /= 1000;
+    write(tempDirname + File.separator + "predictivity.txt", new float[] {predictivity});
+    write(tempDirname + File.separator + "latency.txt", new float[] {latency});
   }
 
   public static byte[] readBytes(String filename) throws IOException {
@@ -107,47 +82,29 @@ public class Benchmark {
     return arr;
   }
 
-  private static NDArray RandomInput() {
-    float[] arr = new float[1*3*224*224];
-    for (int i = 0; i < arr.length; ++i) {
-      arr[i] = (float) Math.random();
-    }
-    NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
-    nd.copyFrom(arr);
-    return nd;
+  public static int[] read(String path, int size) throws IOException{
+    File file = new File(path);
+    BufferedReader br = new BufferedReader(new FileReader(file));
+    int[] arr = new int[size];
+    String st;
+    for (int i=0; i<size; i++)
+      arr[i] = Integer.parseInt(br.readLine());
+    return arr;
   }
 
-  private static NDArray FixedInput() throws IOException {
-    FileReader fileReader = new FileReader("arr.txt");
-    BufferedReader bufferedReader = new BufferedReader(fileReader);
-    float[] arr = new float[3 * 224 * 224];
-    
-    int i = 0;
-    String line = null;
-    while ((line = bufferedReader.readLine()) != null) {
-        arr[i] = Float.parseFloat(line);
-        i += 1;
+  public static void write(String filename, float[]x) throws IOException{
+    BufferedWriter outputWriter = null;
+    outputWriter = new BufferedWriter(new FileWriter(filename));
+    for (int i = 0; i < x.length; i++) {
+      outputWriter.write(String.format("%.12f\n", x[i]));
     }
-    NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
-    nd.copyFrom(arr);
-    return nd;
-  }
-    
-   
-
-  private static void NDArrayIndexing() {
-    float[] arr = new float[2 * 3 * 4];
-    for (int i=0; i<2 * 3 * 4; i++) {
-      arr[i] = (float) i;
-    }
-    NDArray nd = NDArray.empty(new long[]{1, 2, 3, 4});
-    nd.copyFrom(arr);
+    outputWriter.flush();
+    outputWriter.close();
   }
 
   public static BufferedImage toBufferedImage(Image img) {
-    if (img instanceof BufferedImage) {
+    if (img instanceof BufferedImage)
       return (BufferedImage) img;
-    }
   
     // Create a buffered image with transparency
     BufferedImage bimage = new BufferedImage(img.getWidth(null), img.getHeight(null), BufferedImage.TYPE_INT_ARGB);
@@ -159,26 +116,14 @@ public class Benchmark {
   
     // Return the buffered image
     return bimage;
-  }  
-
-  public static void write (String filename, float[]x) throws IOException{
-    BufferedWriter outputWriter = null;
-    outputWriter = new BufferedWriter(new FileWriter(filename));
-    for (int i = 0; i < x.length; i++) {
-      outputWriter.write(Float.toString(x[i]));
-      outputWriter.newLine();
-    }
-    outputWriter.flush();
-    outputWriter.close();
   }
 
-  private static NDArray ImageArray(String path) {
+  private static NDArray ImageArray(String path, int dim) {
     try {
-      img = toBufferedImage(ImageIO.read(new File(path)).getScaledInstance(224, 224, Image.SCALE_DEFAULT));
+      img = toBufferedImage(ImageIO.read(new File(path)).getScaledInstance(dim, dim, Image.SCALE_DEFAULT));
     } catch (IOException e) {
     }
-    float[] arr = new float[3 * 224 * 224];
-    float[] brr = new float[3 * 224 * 224];
+    float[] arr = new float[3 * dim * dim];
     int rgb;
     int count = 0;
     float alpha;
@@ -186,29 +131,34 @@ public class Benchmark {
     float green;
     float blue;
     float[] colors;
-    for (int i = 0; i < 224; i++) {
-      for (int j = 0; j < 224; j++) {
+    for (int i = 0; i < dim; i++) {
+      for (int j = 0; j < dim; j++) {
         rgb = img.getRGB(i, j); //always returns TYPE_INT_ARGB
         alpha = (float) ((rgb >> 24) & 0xFF);
         red =   (float) ((rgb >> 16) & 0xFF);
         green = (float) ((rgb >>  8) & 0xFF);
         blue =  (float) ((rgb      ) & 0xFF);
         colors = new float[]{(float) ((red - 123) / 58.395), (float) ((green - 117) / 57.12), (float) ((blue - 104) / 57.375)};
-        brr[224 * 224 * 0 + 224 * j + i] = red / 256;
-        brr[224 * 224 * 1 + 224 * j + i] = green / 256;
-        brr[224 * 224 * 2 + 224 * j + i] = blue / 256;
-        for (int k=0; k<3; k++) {
-          arr[224 * 224 * k + 224 * j + i] = colors[k];
-        }
+        for (int k=0; k<3; k++)
+          arr[dim * dim * k + dim * j + i] = colors[k];
       }
     }
-    try {
-      write("arr.txt", brr);
-    } catch (IOException e) {
-    }
-    NDArray nd = NDArray.empty(new long[]{1, 3, 224, 224});
+    NDArray nd = NDArray.empty(new long[]{1, 3, dim, dim});
     nd.copyFrom(arr);
     return nd;
   }
 
+  private static int argMax(float[] x) {
+    int maxind = -1;
+    float maxval = Float.NEGATIVE_INFINITY;
+    for (int i=0; i< x.length; i++) {
+      if (x[i] > maxval) {
+        maxind = i;
+        maxval = x[i];
+      }
+    }
+    return maxind;
+  }
+
 }
+
